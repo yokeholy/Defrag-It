@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   DndContext,
-  closestCenter,
+  rectIntersection,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -20,6 +20,7 @@ type SectorType = 'empty' | 'used' | 'locked';
 interface Sector {
   id: string;
   type: SectorType;
+  fileId?: string;
 }
 
 const GRID_SIZE = 100;
@@ -27,18 +28,65 @@ const LOCKED_RATIO = 0.1;
 const USED_RATIO = 0.4;
 
 const generateInitialSectors = (): Sector[] => {
-  const sectors: Sector[] = [];
-  for (let i = 0; i < GRID_SIZE; i++) {
-    const rand = Math.random();
-    let type: SectorType = 'empty';
-    if (rand < LOCKED_RATIO) type = 'locked';
-    else if (rand < LOCKED_RATIO + USED_RATIO) type = 'used';
-    sectors.push({ id: `sector-${i}`, type });
+  const sectors: Sector[] = Array(GRID_SIZE).fill(null).map((_, i) => ({
+    id: `slot-${i}`,
+    type: 'empty'
+  }));
+
+  let lockedCount = Math.floor(GRID_SIZE * LOCKED_RATIO);
+  while (lockedCount > 0) {
+    const idx = Math.floor(Math.random() * GRID_SIZE);
+    if (sectors[idx].type === 'empty') {
+      sectors[idx].type = 'locked';
+      lockedCount--;
+    }
   }
-  return sectors.sort(() => Math.random() - 0.5);
+
+  let usedCount = 0;
+  const targetUsed = Math.floor(GRID_SIZE * USED_RATIO);
+  let fileCounter = 0;
+
+  while (usedCount < targetUsed) {
+    const fileSize = Math.floor(Math.random() * 4) + 1;
+    const startIdx = Math.floor(Math.random() * (GRID_SIZE - fileSize));
+    
+    let canPlace = true;
+    for (let i = 0; i < fileSize; i++) {
+      if (sectors[startIdx + i].type !== 'empty') {
+        canPlace = false;
+        break;
+      }
+    }
+
+    if (canPlace) {
+      const fileId = `file-${fileCounter++}`;
+      for (let i = 0; i < fileSize; i++) {
+        sectors[startIdx + i].type = 'used';
+        sectors[startIdx + i].fileId = fileId;
+      }
+      usedCount += fileSize;
+    }
+    if (fileCounter > 100) break;
+  }
+
+  return sectors;
 };
 
-const SectorSlot = ({ sector, isDefragged, isDragging }: { sector: Sector; isDefragged: boolean; isDragging: boolean }) => {
+const SectorSlot = ({ 
+  sector, 
+  isDefragged, 
+  isDragging, 
+  isPotentialDrop,
+  isFirst,
+  isLast
+}: { 
+  sector: Sector; 
+  isDefragged: boolean; 
+  isDragging: boolean;
+  isPotentialDrop: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+}) => {
   const { setNodeRef: setDraggableRef, attributes, listeners } = useDraggable({
     id: sector.id,
     disabled: sector.type !== 'used',
@@ -50,9 +98,11 @@ const SectorSlot = ({ sector, isDefragged, isDragging }: { sector: Sector; isDef
   });
 
   const typeClass = `sector-${sector.type}`;
-  const defraggedClass = isDefragged ? 'defragged' : '';
+  const defraggedClass = (sector.type === 'used' && isDefragged) ? 'defragged' : '';
   const draggingClass = isDragging ? 'is-dragging-source' : '';
-  const overClass = isOver ? 'drop-target' : '';
+  const overClass = (isOver || isPotentialDrop) ? 'drop-target' : '';
+  
+  const connectivityClass = sector.fileId ? `${isFirst ? 'file-start' : ''} ${isLast ? 'file-end' : ''}` : '';
 
   return (
     <div
@@ -60,7 +110,7 @@ const SectorSlot = ({ sector, isDefragged, isDragging }: { sector: Sector; isDef
         setDraggableRef(node);
         setDroppableRef(node);
       }}
-      className={`sector ${typeClass} ${defraggedClass} ${draggingClass} ${overClass}`}
+      className={`sector ${typeClass} ${defraggedClass} ${draggingClass} ${overClass} ${connectivityClass}`}
       {...(sector.type === 'used' ? { ...attributes, ...listeners } : {})}
     />
   );
@@ -69,78 +119,121 @@ const SectorSlot = ({ sector, isDefragged, isDragging }: { sector: Sector; isDef
 function App() {
   const [sectors, setSectors] = useState<Sector[]>(() => generateInitialSectors());
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState(0); 
   const [isWon, setIsWon] = useState(false);
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
 
+  const activeFileData = useMemo(() => {
+    if (!activeId) return null;
+    const activeIdx = sectors.findIndex(s => s.id === activeId);
+    const activeSector = sectors[activeIdx];
+    if (!activeSector || !activeSector.fileId) return null;
+
+    const fileSectors = sectors.filter(s => s.fileId === activeSector.fileId);
+    
+    return {
+      fileId: activeSector.fileId,
+      size: fileSectors.length,
+    };
+  }, [activeId, sectors]);
+
+  const potentialDropIndices = useMemo(() => {
+    if (!activeFileData || !overId) return new Set<number>();
+    
+    const targetIdx = sectors.findIndex(s => s.id === overId);
+    const startIdx = targetIdx;
+    const endIdx = startIdx + activeFileData.size - 1;
+
+    if (startIdx < 0 || endIdx >= GRID_SIZE) return new Set<number>();
+
+    for (let i = startIdx; i <= endIdx; i++) {
+      if (sectors[i].type !== 'empty' && sectors[i].fileId !== activeFileData.fileId) {
+        return new Set<number>();
+      }
+    }
+
+    const indices = new Set<number>();
+    for (let i = startIdx; i <= endIdx; i++) indices.add(i);
+    return indices;
+  }, [activeFileData, overId, sectors]);
+
   const defraggedIndices = useMemo(() => {
     const indices = new Set<number>();
-    let lastUsedIndex = -1;
-    
-    // Find how many used blocks should be at the front
-    const totalUsed = sectors.filter(s => s.type === 'used').length;
-    let foundUsed = 0;
+    let foundEmpty = false;
     
     for (let i = 0; i < sectors.length; i++) {
-      if (sectors[i].type === 'used') {
-        foundUsed++;
-        if (foundUsed <= totalUsed) {
-          // If this is one of the "first" used blocks and is contiguous or at the start
-          // For simplicity: a block is "defragged" if it's one of the first N used blocks 
-          // AND there are no empty blocks before it.
-          const sliceBefore = sectors.slice(0, i);
-          const hasEmptyBefore = sliceBefore.some(s => s.type === 'empty');
-          if (!hasEmptyBefore) {
-            indices.add(i);
-          }
-        }
+      if (sectors[i].type === 'empty') {
+        foundEmpty = true;
+      } else if (sectors[i].type === 'used' && !foundEmpty) {
+        indices.add(i);
       }
     }
     return indices;
   }, [sectors]);
 
   const checkWin = (currentSectors: Sector[]) => {
-    const firstEmptyIndex = currentSectors.findIndex(s => s.type === 'empty');
-    if (firstEmptyIndex === -1) return true;
-    const anyUsedAfterEmpty = currentSectors.slice(firstEmptyIndex).some(s => s.type === 'used');
-    return !anyUsedAfterEmpty;
+    let foundEmpty = false;
+    for (const s of currentSectors) {
+      if (s.type === 'empty') foundEmpty = true;
+      else if (s.type === 'used' && foundEmpty) return false;
+    }
+    return true;
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
+    const id = event.active.id as string;
+    setActiveId(id);
+    
+    const activeIdx = sectors.findIndex(s => s.id === id);
+    const activeSector = sectors[activeIdx];
+    const firstIdx = sectors.findIndex(s => s.fileId === activeSector.fileId);
+    setDragOffset(activeIdx - firstIdx);
+  };
+
+  const handleDragOver = (event: any) => {
+    setOverId(event.over?.id || null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+    const { over } = event;
     setActiveId(null);
+    setOverId(null);
+    setDragOffset(0);
 
-    if (over && active.id !== over.id) {
-      const activeSector = sectors.find(s => s.id === active.id);
-      const overSector = sectors.find(s => s.id === over.id);
+    if (over && activeFileData && potentialDropIndices.size > 0) {
+      setSectors((prev) => {
+        const newSectors = prev.map(s => ({ ...s }));
+        const targetIdx = prev.findIndex(s => s.id === over.id);
+        const newStartIdx = targetIdx;
 
-      if (activeSector?.type === 'used' && overSector?.type === 'empty') {
-        setSectors((items) => {
-          const oldIndex = items.findIndex((i) => i.id === active.id);
-          const newIndex = items.findIndex((i) => i.id === over.id);
-          
-          const newSectors = [...items];
-          // Swap types (content) instead of the whole object to keep IDs stable if preferred
-          // But swapping objects is fine here since we want the "content" to move.
-          const temp = newSectors[oldIndex];
-          newSectors[oldIndex] = newSectors[newIndex];
-          newSectors[newIndex] = temp;
-
-          if (checkWin(newSectors)) {
-            setIsWon(true);
+        prev.forEach((s, idx) => {
+          if (s.fileId === activeFileData.fileId) {
+            newSectors[idx].type = 'empty';
+            delete newSectors[idx].fileId;
           }
-          return newSectors;
         });
-      }
+
+        for (let i = 0; i < activeFileData.size; i++) {
+          newSectors[newStartIdx + i].type = 'used';
+          newSectors[newStartIdx + i].fileId = activeFileData.fileId;
+        }
+
+        if (checkWin(newSectors)) {
+          setIsWon(true);
+        }
+        return newSectors;
+      });
     }
   };
 
@@ -149,56 +242,79 @@ function App() {
     setIsWon(false);
   };
 
-  const activeSector = activeId ? sectors.find(s => s.id === activeId) : null;
-
   return (
-    <div className="game-container">
-      <header>
-        <h1>defragIt</h1>
-        <p>
-          Drag <span className="text-used">fragmented</span> blocks to the front until they turn <span className="text-defragged">green</span>.
-        </p>
-      </header>
-      
-      <div className={`status ${isWon ? 'won' : ''}`}>
-        {isWon ? 'DISK OPTIMIZED!' : 'Defragmentation in progress...'}
+    <DndContext
+      sensors={sensors}
+      collisionDetection={rectIntersection}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="game-container">
+        <header { ...{ style: { cursor: 'default' } } }>
+          <h1>defragIt <small>v1.1</small></h1>
+          <p>
+            Drag <span className="text-used">multi-sector files</span>. The slot you hover becomes the file's <strong>head</strong>.
+          </p>
+        </header>
+        
+        <div className={`status ${isWon ? 'won' : ''}`}>
+          {isWon ? 'DISK OPTIMIZED!' : 'Defragmentation in progress...'}
+        </div>
+
+        <div className="disk-grid">
+          {sectors.map((sector, index) => {
+            const isFirst = sector.fileId !== undefined && (index === 0 || sectors[index - 1].fileId !== sector.fileId);
+            const isLast = sector.fileId !== undefined && (index === sectors.length - 1 || sectors[index + 1].fileId !== sector.fileId);
+            
+            return (
+              <SectorSlot 
+                key={sector.id} 
+                sector={sector} 
+                isDefragged={defraggedIndices.has(index)}
+                isDragging={activeFileData?.fileId === sector.fileId}
+                isPotentialDrop={potentialDropIndices.has(index)}
+                isFirst={isFirst}
+                isLast={isLast}
+              />
+            );
+          })}
+        </div>
+
+        <button className="reset-btn" onClick={resetGame}>Reset Disk</button>
+        
+        <footer>
+          <div className="legend">
+            <div className="legend-item"><div className="sector sector-used defragged" /> Defragged</div>
+            <div className="legend-item"><div className="sector sector-used" /> Fragmented</div>
+            <div className="legend-item"><div className="sector sector-locked" /> Locked</div>
+            <div className="legend-item"><div className="sector sector-empty" /> Free</div>
+          </div>
+        </footer>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="disk-grid">
-          {sectors.map((sector, index) => (
-            <SectorSlot 
-              key={sector.id} 
-              sector={sector} 
-              isDefragged={defraggedIndices.has(index)}
-              isDragging={activeId === sector.id}
-            />
-          ))}
-        </div>
-
-        <DragOverlay>
-          {activeSector ? (
-            <div className={`sector sector-used ${defraggedIndices.has(sectors.indexOf(activeSector)) ? 'defragged' : ''}`} style={{ cursor: 'grabbing' }} />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      <button className="reset-btn" onClick={resetGame}>Reset Disk</button>
-      
-      <footer>
-        <div className="legend">
-          <div className="legend-item"><div className="sector sector-used defragged" /> Defragged</div>
-          <div className="legend-item"><div className="sector sector-used" /> Fragmented</div>
-          <div className="legend-item"><div className="sector sector-locked" /> Locked</div>
-          <div className="legend-item"><div className="sector sector-empty" /> Free</div>
-        </div>
-      </footer>
-    </div>
+      <DragOverlay dropAnimation={null}>
+        {activeFileData ? (
+          <div 
+            style={{ 
+              // Using margin instead of transform to avoid fighting dnd-kit's internal positioning
+              marginLeft: `-${dragOffset * (42 + 6)}px`,
+              pointerEvents: 'none'
+            }}
+          >
+            <div className="file-dragging-overlay" style={{ display: 'flex' }}>
+              {Array(activeFileData.size).fill(0).map((_, i) => (
+                <div 
+                  key={i} 
+                  className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} 
+                  style={{ opacity: 0.8 }} 
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
 
