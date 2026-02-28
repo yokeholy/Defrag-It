@@ -75,32 +75,42 @@ const generateInitialSectors = (): Sector[] => {
 const SectorSlot = ({ 
   sector, 
   isDefragged, 
-  isDragging, 
   isPotentialDrop,
+  isDropValid,
   isFirst,
-  isLast
+  isLast,
+  isGameWon
 }: { 
   sector: Sector; 
   isDefragged: boolean; 
-  isDragging: boolean;
   isPotentialDrop: boolean;
+  isDropValid: boolean;
   isFirst: boolean;
   isLast: boolean;
+  isGameWon: boolean;
 }) => {
   const { setNodeRef: setDraggableRef, attributes, listeners } = useDraggable({
     id: sector.id,
-    disabled: sector.type !== 'used',
+    disabled: sector.type !== 'used' || isGameWon,
   });
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: sector.id,
-    disabled: sector.type !== 'empty',
+    disabled: sector.type !== 'empty' || isGameWon,
   });
 
   const typeClass = `sector-${sector.type}`;
   const defraggedClass = (sector.type === 'used' && isDefragged) ? 'defragged' : '';
-  const overClass = (isOver || isPotentialDrop) ? 'drop-target' : '';
   
+  // Visual state for drop target
+  let dropClass = '';
+  if (isPotentialDrop) {
+    dropClass = isDropValid ? 'drop-target-valid' : 'drop-target-invalid';
+  } else if (isOver && !isPotentialDrop) {
+    // If we are over a single slot but it's not part of a valid file range
+    dropClass = 'drop-target-invalid';
+  }
+
   const connectivityClass = sector.fileId ? `file-member ${isFirst ? 'file-start' : ''} ${isLast ? 'file-end' : ''}` : '';
 
   return (
@@ -109,8 +119,8 @@ const SectorSlot = ({
         setDraggableRef(node);
         setDroppableRef(node);
       }}
-      className={`sector ${typeClass} ${defraggedClass} ${overClass} ${connectivityClass}`}
-      {...(sector.type === 'used' ? { ...attributes, ...listeners } : {})}
+      className={`sector ${typeClass} ${defraggedClass} ${dropClass} ${connectivityClass}`}
+      {...(sector.type === 'used' && !isGameWon ? { ...attributes, ...listeners } : {})}
     />
   );
 };
@@ -147,24 +157,28 @@ function App() {
     };
   }, [activeId, sectors]);
 
-  const potentialDropIndices = useMemo(() => {
-    if (!activeFileData || !overId) return new Set<number>();
+  const landingData = useMemo(() => {
+    if (!activeFileData || !overId) return { indices: new Set<number>(), isValid: false };
     
     const targetIdx = sectors.findIndex(s => s.id === overId);
     const startIdx = targetIdx;
     const endIdx = startIdx + activeFileData.size - 1;
 
-    if (startIdx < 0 || endIdx >= GRID_SIZE) return new Set<number>();
+    // Out of bounds check
+    if (startIdx < 0 || endIdx >= GRID_SIZE) return { indices: new Set<number>(), isValid: false };
+
+    const indices = new Set<number>();
+    let isValid = true;
 
     for (let i = startIdx; i <= endIdx; i++) {
-      if (sectors[i].type !== 'empty' && sectors[i].fileId !== activeFileData.fileId) {
-        return new Set<number>();
+      indices.add(i);
+      const s = sectors[i];
+      if (s.type !== 'empty' && s.fileId !== activeFileData.fileId) {
+        isValid = false;
       }
     }
 
-    const indices = new Set<number>();
-    for (let i = startIdx; i <= endIdx; i++) indices.add(i);
-    return indices;
+    return { indices, isValid };
   }, [activeFileData, overId, sectors]);
 
   const defraggedIndices = useMemo(() => {
@@ -180,6 +194,12 @@ function App() {
     }
     return indices;
   }, [sectors]);
+
+  const defragPercentage = useMemo(() => {
+    const totalUsed = sectors.filter(s => s.type === 'used').length;
+    if (totalUsed === 0) return 100;
+    return Math.floor((defraggedIndices.size / totalUsed) * 100);
+  }, [sectors, defraggedIndices]);
 
   const checkWin = (currentSectors: Sector[]) => {
     let foundEmpty = false;
@@ -206,26 +226,30 @@ function App() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { over } = event;
+    const success = over && landingData.isValid;
+
     setActiveId(null);
     setOverId(null);
     setDragOffset(0);
 
-    if (over && activeFileData && potentialDropIndices.size > 0) {
+    if (success) {
       setSectors((prev) => {
         const newSectors = prev.map(s => ({ ...s }));
         const targetIdx = prev.findIndex(s => s.id === over.id);
         const newStartIdx = targetIdx;
 
+        // 1. Clear old positions
         prev.forEach((s, idx) => {
-          if (s.fileId === activeFileData.fileId) {
+          if (s.fileId === activeFileData!.fileId) {
             newSectors[idx].type = 'empty';
             delete newSectors[idx].fileId;
           }
         });
 
-        for (let i = 0; i < activeFileData.size; i++) {
+        // 2. Fill new positions
+        for (let i = 0; i < activeFileData!.size; i++) {
           newSectors[newStartIdx + i].type = 'used';
-          newSectors[newStartIdx + i].fileId = activeFileData.fileId;
+          newSectors[newStartIdx + i].fileId = activeFileData!.fileId;
         }
 
         if (checkWin(newSectors)) {
@@ -249,19 +273,22 @@ function App() {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="game-container">
+      <div className={`game-container ${isWon ? 'game-won' : ''}`}>
         <header { ...{ style: { cursor: 'default' } } }>
           <h1>defragIt <small>v1.1</small></h1>
           <p>
-            Drag <span className="text-used">multi-sector files</span>. The slot you hover becomes the file's <strong>head</strong>.
+            Optimization: <strong>{defragPercentage}%</strong>
           </p>
         </header>
         
         <div className={`status ${isWon ? 'won' : ''}`}>
-          {isWon ? 'DISK OPTIMIZED!' : 'Defragmentation in progress...'}
+          {isWon ? 'DISK OPTIMIZED!' : `Defragmenting: ${defragPercentage}%`}
+          <div className="progress-bar-container">
+            <div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div>
+          </div>
         </div>
 
-        <div className="disk-grid">
+        <div className={`disk-grid ${isWon ? 'locked-grid' : ''}`}>
           {sectors.map((sector, index) => {
             const isFirst = sector.fileId !== undefined && (index === 0 || sectors[index - 1].fileId !== sector.fileId);
             const isLast = sector.fileId !== undefined && (index === sectors.length - 1 || sectors[index + 1].fileId !== sector.fileId);
@@ -271,10 +298,11 @@ function App() {
                 key={sector.id} 
                 sector={sector} 
                 isDefragged={defraggedIndices.has(index)}
-                isDragging={activeFileData?.fileId === sector.fileId}
-                isPotentialDrop={potentialDropIndices.has(index)}
+                isPotentialDrop={landingData.indices.has(index)}
+                isDropValid={landingData.isValid}
                 isFirst={isFirst}
                 isLast={isLast}
+                isGameWon={isWon}
               />
             );
           })}
@@ -293,10 +321,9 @@ function App() {
       </div>
 
       <DragOverlay dropAnimation={null}>
-        {activeFileData ? (
+        {activeFileData && !isWon ? (
           <div 
             style={{ 
-              // Using margin instead of transform to avoid fighting dnd-kit's internal positioning
               marginLeft: `-${dragOffset * (42 + 6)}px`,
               pointerEvents: 'none'
             }}
