@@ -108,7 +108,7 @@ header p {
 }
 
 /* Connectors */
-.sector[class*="file-"]:not(.file-end)::after {
+.sector.file-member:not(.file-end)::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -146,11 +146,6 @@ header p {
   position: absolute;
   inset: 0;
   background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%, rgba(0,0,0,0.2) 100%);
-}
-
-.sector.is-dragging-source {
-  opacity: 0.1;
-  filter: grayscale(1);
 }
 
 .sector.drop-target {

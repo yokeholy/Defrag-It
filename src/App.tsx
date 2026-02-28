@@ -99,10 +99,9 @@ const SectorSlot = ({
 
   const typeClass = `sector-${sector.type}`;
   const defraggedClass = (sector.type === 'used' && isDefragged) ? 'defragged' : '';
-  const draggingClass = isDragging ? 'is-dragging-source' : '';
   const overClass = (isOver || isPotentialDrop) ? 'drop-target' : '';
   
-  const connectivityClass = sector.fileId ? `${isFirst ? 'file-start' : ''} ${isLast ? 'file-end' : ''}` : '';
+  const connectivityClass = sector.fileId ? `file-member ${isFirst ? 'file-start' : ''} ${isLast ? 'file-end' : ''}` : '';
 
   return (
     <div
@@ -110,7 +109,7 @@ const SectorSlot = ({
         setDraggableRef(node);
         setDroppableRef(node);
       }}
-      className={`sector ${typeClass} ${defraggedClass} ${draggingClass} ${overClass} ${connectivityClass}`}
+      className={`sector ${typeClass} ${defraggedClass} ${overClass} ${connectivityClass}`}
       {...(sector.type === 'used' ? { ...attributes, ...listeners } : {})}
     />
   );
