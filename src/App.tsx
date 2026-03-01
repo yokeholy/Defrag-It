@@ -231,7 +231,7 @@ function App() {
     const activeSector = sectors[activeIdx];
     if (!activeSector || !activeSector.fileId) return null;
     const fileSectors = sectors.filter(s => s.fileId === activeSector.fileId);
-    return { fileId: activeSector.fileId, size: fileSectors.length };
+    return { fileId: activeSector.fileId, size: fileSectors.length, currentStartIdx: sectors.indexOf(fileSectors[0]) };
   }, [activeId, sectors]);
 
   const landingData = useMemo(() => {
@@ -277,9 +277,17 @@ function App() {
   };
 
   const executeMove = (fileId: string, targetStartIdx: number) => {
+    // 1. Get info about the file from CURRENT state
+    const fileSectors = sectors.filter(s => s.fileId === fileId);
+    if (fileSectors.length === 0) return;
+    
+    const currentIdx = sectors.indexOf(fileSectors[0]);
+    if (currentIdx === targetStartIdx) return; // Ignore if no position change
+
+    const size = fileSectors.length;
+
+    // 2. Perform disk update
     setSectors((prev) => {
-      const fileSectors = prev.filter(s => s.fileId === fileId);
-      const size = fileSectors.length;
       const newSectors = prev.map(s => ({ ...s }));
       prev.forEach((s, idx) => {
         if (s.fileId === fileId) {
@@ -291,11 +299,14 @@ function App() {
         newSectors[targetStartIdx + i].type = 'used';
         newSectors[targetStartIdx + i].fileId = fileId;
       }
-      setMoveCount(m => m + 1);
-      setVolumeMoved(v => v + size);
+      
       if (checkWinCondition(newSectors)) setIsWon(true);
       return newSectors;
     });
+
+    // 3. Update Stats (using calculated 'size' before the async state update)
+    setMoveCount(m => m + 1);
+    setVolumeMoved(v => v + size);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -315,9 +326,12 @@ function App() {
     const { over } = event;
     const currentLanding = landingData;
     const movingFile = activeFileData;
+
     if (over && currentLanding.isValid && movingFile) {
-      executeMove(movingFile.fileId, sectors.findIndex(s => s.id === over.id));
+      const targetStartIdx = sectors.findIndex(s => s.id === over.id);
+      executeMove(movingFile.fileId, targetStartIdx);
     }
+
     setActiveId(null);
     setOverId(null);
     setDragOffset(0);
@@ -328,7 +342,7 @@ function App() {
     setIsSolving(true);
   };
 
-  // 100% SUCCESS RATE "BEST FIT" SOLVER
+  // 100% SUCCESS RATE BEST FIT SOLVER
   useEffect(() => {
     if (!isSolving || isWon) {
       if (solveTimerRef.current) clearTimeout(solveTimerRef.current);
@@ -340,20 +354,16 @@ function App() {
       const firstEmptyIdx = sectors.findIndex(s => s.type === 'empty');
       if (firstEmptyIdx === -1) return null;
 
-      // Calculate size of the first gap
       let gapSize = 0;
       for (let i = firstEmptyIdx; i < sectors.length; i++) {
-        if (sectors[i].type === 'empty') gapSize++;
-        else break;
+        if (sectors[i].type === 'empty') gapSize++; else break;
       }
 
-      // Collect all potential candidate files AFTER the gap
       const allFiles: { fileId: string; size: number; start: number }[] = [];
       const seenFiles = new Set<string>();
       const searchStart = firstEmptyIdx + gapSize;
 
       sectors.forEach((s, index) => {
-        // Optimization: Only scan starting after the gap
         if (index >= searchStart && s.type === 'used' && s.fileId && !seenFiles.has(s.fileId)) {
           seenFiles.add(s.fileId);
           const fileSectors = sectors.filter(item => item.fileId === s.fileId);
@@ -368,9 +378,6 @@ function App() {
         return true;
       };
 
-      // Strategy 1: Best Fit Fill
-      // Find the LARGEST file that fits into the current gap.
-      // This maximizes space utilization and prevents small files from "poisoning" large gaps.
       let bestFit = null;
       for (const file of allFiles) {
         if (file.size <= gapSize) {
@@ -380,23 +387,16 @@ function App() {
         }
       }
 
-      if (bestFit) {
-        return { fileId: bestFit.fileId, targetIdx: firstEmptyIdx };
-      }
+      if (bestFit) return { fileId: bestFit.fileId, targetIdx: firstEmptyIdx };
 
-      // Strategy 2: If no file fits (all candidates > gapSize), we MUST widen the gap.
-      // Move the blocker (the file immediately following the gap) to the END.
       const blockerIdx = firstEmptyIdx + gapSize;
       const blocker = allFiles.find(f => f.start === blockerIdx);
-      
       if (blocker) {
-        // Find furthest valid spot at the end
         for (let i = sectors.length - blocker.size; i > blocker.start; i--) {
           if (canFit(blocker.size, i)) return { fileId: blocker.fileId, targetIdx: i };
         }
       }
 
-      // Fallback: If blocker is stuck (end is full), move it to ANY valid spot forward.
       if (blocker) {
         for (let i = blocker.start + 1; i <= sectors.length - blocker.size; i++) {
            if (canFit(blocker.size, i)) return { fileId: blocker.fileId, targetIdx: i };
@@ -456,7 +456,6 @@ function App() {
           <div className="progress-bar-container"><div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div></div>
         </div>
         <DiskGrid sectors={sectors} sectorMetadata={sectorMetadata} defraggedIndices={defraggedIndices} isWon={isWon} isSolving={isSolving} config={config} landingIndices={landingData.indices} isLandingValid={landingData.isValid} />
-        
         <div className="main-actions">
           <button className="reset-btn" onClick={() => setShowModal(true)}>New Disk</button>
           {!isWon && (
@@ -466,19 +465,11 @@ function App() {
               </button>
               <div className="speed-control">
                 <span className="speed-label">{solveSpeed}s</span>
-                <input 
-                  type="range" 
-                  min="0.1" 
-                  max="1.0" 
-                  step="0.1" 
-                  value={solveSpeed} 
-                  onChange={(e) => setSolveSpeed(parseFloat(e.target.value))}
-                />
+                <input type="range" min="0.1" max="1.0" step="0.1" value={solveSpeed} onChange={(e) => setSolveSpeed(parseFloat(e.target.value))} />
               </div>
             </div>
           )}
         </div>
-        
         <footer>
           <div className="legend">
             <div className="legend-item"><div className="sector sector-used defragged" style={{ width: 14, height: 14 }} /> Defragged</div>
