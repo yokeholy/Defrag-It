@@ -15,6 +15,7 @@ import {
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import './App.css';
+import { sounds } from './sounds';
 
 type SectorType = 'empty' | 'used' | 'locked';
 type DifficultyMode = 'Easy' | 'Hard' | 'Nightmare';
@@ -120,6 +121,7 @@ const SectorSlot = memo(({
         setDroppableRef(node);
       }}
       className={`sector ${typeClass} ${defraggedClass} ${connectivityClass}`}
+      style={{ width: 'var(--actual-sector-size)', height: 'var(--actual-sector-size)' }}
       {...(sector.type === 'used' && !isGameWon && !isSolving ? { ...attributes, ...listeners } : {})}
     />
   );
@@ -147,7 +149,9 @@ const DiskGrid = memo(({
   return (
     <div 
       className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
-      style={{ gridTemplateColumns: `repeat(${config.cols}, 1fr)` }}
+      style={{ 
+        gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
+      }}
     >
       {sectors.map((sector, index) => (
         <SectorSlot 
@@ -169,8 +173,8 @@ const DiskGrid = memo(({
             className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
-              top: `calc(var(--padding) + ${row} * (var(--size) + var(--gap)))`,
-              left: `calc(var(--padding) + ${col} * (var(--size) + var(--gap)))`,
+              top: `calc(var(--actual-grid-padding) + ${row} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
+              left: `calc(var(--actual-grid-padding) + ${col} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
               pointerEvents: 'none',
               zIndex: 10
             }}
@@ -193,6 +197,7 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [isSolving, setIsSolving] = useState(false);
   const [solveSpeed, setSolveSpeed] = useState(0.5); 
+  const [isMuted, setIsMuted] = useState(false);
 
   const [moveCount, setMoveCount] = useState(0);
   const [volumeMoved, setVolumeMoved] = useState(0);
@@ -201,9 +206,23 @@ function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(TouchSensor, { 
+      activationConstraint: { delay: 200, tolerance: 5 } 
+    }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  // Apply mute state to sound engine
+  useEffect(() => {
+    sounds.toggle(!isMuted);
+  }, [isMuted]);
+
+  // Play win sound when game is won
+  useEffect(() => {
+    if (isWon) {
+      sounds.playWin();
+    }
+  }, [isWon]);
 
   const sectorMetadata = useMemo(() => {
     return sectors.map((sector, index) => {
@@ -292,6 +311,7 @@ function App() {
 
     setMoveCount(m => m + 1);
     setVolumeMoved(v => v + size);
+    sounds.playDrop();
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -301,6 +321,7 @@ function App() {
     const activeSector = sectors[activeIdx];
     const firstIdx = sectors.findIndex(s => s.fileId === activeSector.fileId);
     setDragOffset(activeIdx - firstIdx);
+    sounds.playPickup();
   };
 
   const handleDragOver = (event: any) => {
@@ -314,6 +335,8 @@ function App() {
     if (over && currentLanding.isValid && movingFile) {
       const targetStartIdx = sectors.findIndex(s => s.id === over.id);
       executeMove(movingFile.fileId, targetStartIdx);
+    } else if (over && !currentLanding.isValid) {
+      sounds.playError();
     }
     setActiveId(null);
     setOverId(null);
@@ -323,6 +346,7 @@ function App() {
   const startAutoSolve = () => {
     if (isWon) return;
     setIsSolving(true);
+    sounds.playClick();
   };
 
   useEffect(() => {
@@ -393,6 +417,7 @@ function App() {
     setMoveCount(0);
     setVolumeMoved(0);
     setShowModal(false);
+    sounds.playClick();
   };
 
   const resetAndShuffle = () => {
@@ -402,6 +427,7 @@ function App() {
     setMoveCount(0);
     setVolumeMoved(0);
     setShowModal(false);
+    sounds.playClick();
   };
 
   return (
@@ -417,11 +443,18 @@ function App() {
         style={{
           '--cols': config.cols,
           '--max-sector-size': `${config.sectorSize}px`,
-          '--gap': `${config.gap}px`,
-          '--padding': `${GRID_PADDING}px`
+          '--actual-grid-gap': `${config.gap}px`,
+          '--actual-grid-padding': `${GRID_PADDING}px`
         } as React.CSSProperties}
       >
-        <header><h1>defragIt <small>v1.3</small></h1></header>
+        <header>
+          <div className="header-top">
+            <h1>defragIt <small>v1.3</small></h1>
+            <button className="mute-btn" onClick={() => setIsMuted(!isMuted)}>
+              {isMuted ? '🔇' : '🔊'}
+            </button>
+          </div>
+        </header>
         <div className="stats-bar">
           <div className="stat-item"><span className="stat-label">Moves</span><span className="stat-value">{moveCount}</span></div>
           <div className="stat-item"><span className="stat-label">Volume</span><span className="stat-value">{volumeMoved}</span></div>
@@ -443,10 +476,10 @@ function App() {
         />
 
         <div className="main-actions">
-          <button className="reset-btn" onClick={() => setShowModal(true)}>New Disk</button>
+          <button className="reset-btn" onClick={() => { setShowModal(true); sounds.playClick(); }}>New Disk</button>
           {!isWon && (
             <div className="solve-group">
-              <button className={`solve-btn ${isSolving ? 'active' : ''}`} onClick={isSolving ? () => setIsSolving(false) : startAutoSolve}>
+              <button className={`solve-btn ${isSolving ? 'active' : ''}`} onClick={isSolving ? () => { setIsSolving(false); sounds.playClick(); } : startAutoSolve}>
                 {isSolving ? 'Stop' : 'Auto-Solve'}
               </button>
               <div className="speed-control">
@@ -470,16 +503,16 @@ function App() {
               <h2>Select Difficulty</h2>
               <div className="modal-actions">{(['Easy', 'Hard', 'Nightmare'] as DifficultyMode[]).map((m) => (<button key={m} className={`mode-btn ${mode === m ? 'active' : ''}`} onClick={() => switchDifficulty(m)}>{m}</button>))}</div>
               <button className="close-modal" onClick={resetAndShuffle}>Just Restart Level</button>
-              <button className="close-modal" onClick={() => setShowModal(false)}>Close</button>
+              <button className="close-modal" onClick={() => { setShowModal(false); sounds.playClick(); }}>Close</button>
             </div>
           </div>
         )}
 
         <DragOverlay dropAnimation={null}>
           {activeId && !isWon && activeFileData ? (
-            <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--size) + var(--gap)))`, pointerEvents: 'none' }}>
-              <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--gap)`, width: `calc(${activeFileData.size} * (var(--size) + var(--gap)))` }}>
-                {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--size)`, height: `var(--size)` }} />))}
+            <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
+              <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
+                {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
               </div>
             </div>
           ) : null}
