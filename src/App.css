@@ -1,3 +1,16 @@
+:root {
+  /* Dynamic scaling base values */
+  --grid-gap: var(--actual-grid-gap, 4px);
+  --grid-padding: var(--actual-grid-padding, 8px);
+  
+  /* Formula to calculate the optimal sector size to fit screen width */
+  --available-width: calc(100vw - (var(--grid-padding) * 2) - 40px);
+  --calculated-size: calc((var(--available-width) - (var(--grid-gap) * (var(--cols) - 1))) / var(--cols));
+  
+  /* Final size used for both sectors and highlights */
+  --size: min(var(--max-sector-size, 42px), var(--calculated-size));
+}
+
 #root {
   width: 100%;
   margin: 0;
@@ -40,7 +53,7 @@ body {
 }
 
 header h1 {
-  font-size: clamp(1.5rem, 8vw, 3rem);
+  font-size: clamp(1.5rem, 8vw, 3.5rem);
   margin: 0;
   color: #38bdf8;
   text-transform: uppercase;
@@ -122,13 +135,6 @@ header h1 small {
 }
 
 .disk-grid {
-  /* RESPONSIVE SCALING LOGIC */
-  --gap: var(--actual-grid-gap);
-  --padding: var(--actual-grid-padding);
-  --available-width: calc(100vw - (var(--padding) * 2) - 40px);
-  --calc-size: calc((var(--available-width) - (var(--gap) * (var(--cols) - 1))) / var(--cols));
-  --size: min(var(--max-sector-size), var(--calc-size));
-
   display: grid;
   background-color: #0f172a;
   border-radius: 8px;
@@ -140,8 +146,8 @@ header h1 small {
     inset 0 4px 12px rgba(0, 0, 0, 0.8),
     0 10px 30px rgba(0, 0, 0, 0.4);
   border: 2px solid #1e293b;
-  padding: var(--padding);
-  gap: var(--gap);
+  padding: var(--grid-padding);
+  gap: var(--grid-gap);
 }
 
 .locked-grid {
@@ -155,7 +161,6 @@ header h1 small {
 }
 
 .sector {
-  /* Use the calculated size from the grid container */
   width: var(--size);
   height: var(--size);
   border-radius: 2px;
@@ -187,8 +192,8 @@ header h1 small {
   content: '';
   position: absolute;
   top: 50%;
-  right: calc(-1 * var(--gap) - 1px);
-  width: calc(var(--gap) + 2px);
+  right: calc(-1 * var(--grid-gap) - 1px);
+  width: calc(var(--grid-gap) + 2px);
   height: 40%;
   background-color: inherit;
   transform: translateY(-50%);
