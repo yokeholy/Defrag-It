@@ -127,15 +127,14 @@ const SectorSlot = memo(({
   );
 });
 
+// Pure grid - only re-renders when the disk state changes
 const DiskGrid = memo(({ 
   sectors, 
   sectorMetadata, 
   defraggedIndices, 
   isWon, 
   isSolving,
-  config,
-  landingIndices,
-  isLandingValid
+  config
 }: {
   sectors: Sector[];
   sectorMetadata: any[];
@@ -143,8 +142,6 @@ const DiskGrid = memo(({
   isWon: boolean;
   isSolving: boolean;
   config: DifficultyConfig;
-  landingIndices: Set<number>;
-  isLandingValid: boolean;
 }) => {
   return (
     <div 
@@ -163,20 +160,26 @@ const DiskGrid = memo(({
           isSolving={isSolving}
         />
       ))}
-      
-      {landingIndices.size > 0 && Array.from(landingIndices).map((idx) => {
+    </div>
+  );
+});
+
+// Lightweight highlight component - decoupled from DiskGrid sectors
+const LandingHighlightLayer = memo(({ indices, isValid, config }: { indices: Set<number>; isValid: boolean; config: DifficultyConfig }) => {
+  if (indices.size === 0) return null;
+  return (
+    <div className="highlight-layer">
+      {Array.from(indices).map((idx) => {
         const row = Math.floor(idx / config.cols);
         const col = idx % config.cols;
         return (
           <div
             key={`highlight-${idx}`}
-            className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
+            className={`sector-highlight ${isValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
               top: `calc(var(--actual-grid-padding) + ${row} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
               left: `calc(var(--actual-grid-padding) + ${col} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
-              pointerEvents: 'none',
-              zIndex: 10
             }}
           />
         );
@@ -206,23 +209,12 @@ function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { 
-      activationConstraint: { delay: 200, tolerance: 5 } 
-    }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Apply mute state to sound engine
-  useEffect(() => {
-    sounds.toggle(!isMuted);
-  }, [isMuted]);
-
-  // Play win sound when game is won
-  useEffect(() => {
-    if (isWon) {
-      sounds.playWin();
-    }
-  }, [isWon]);
+  useEffect(() => { sounds.toggle(!isMuted); }, [isMuted]);
+  useEffect(() => { if (isWon) sounds.playWin(); }, [isWon]);
 
   const sectorMetadata = useMemo(() => {
     return sectors.map((sector, index) => {
@@ -250,7 +242,6 @@ function App() {
     const startIdx = targetIdx;
     const endIdx = startIdx + activeFileData.size - 1;
     if (startIdx < 0 || endIdx >= config.size) return { indices: new Set<number>(), isValid: false };
-    
     const indices = new Set<number>();
     let isValid = true;
     for (let i = startIdx; i <= endIdx; i++) {
@@ -324,9 +315,7 @@ function App() {
     sounds.playPickup();
   };
 
-  const handleDragOver = (event: any) => {
-    setOverId(event.over?.id || null);
-  };
+  const handleDragOver = (event: any) => { setOverId(event.over?.id || null); };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { over } = event;
@@ -343,11 +332,7 @@ function App() {
     setDragOffset(0);
   };
 
-  const startAutoSolve = () => {
-    if (isWon) return;
-    setIsSolving(true);
-    sounds.playClick();
-  };
+  const startAutoSolve = () => { if (!isWon) setIsSolving(true); sounds.playClick(); };
 
   useEffect(() => {
     if (!isSolving || isWon) {
@@ -464,16 +449,21 @@ function App() {
           <div className="progress-bar-container"><div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div></div>
         </div>
         
-        <DiskGrid 
-          sectors={sectors} 
-          sectorMetadata={sectorMetadata} 
-          defraggedIndices={defraggedIndices} 
-          isWon={isWon} 
-          isSolving={isSolving} 
-          config={config} 
-          landingIndices={landingData.indices} 
-          isLandingValid={landingData.isValid} 
-        />
+        <div className="grid-wrapper">
+          <DiskGrid 
+            sectors={sectors} 
+            sectorMetadata={sectorMetadata} 
+            defraggedIndices={defraggedIndices} 
+            isWon={isWon} 
+            isSolving={isSolving} 
+            config={config} 
+          />
+          <LandingHighlightLayer 
+            indices={landingData.indices} 
+            isValid={landingData.isValid} 
+            config={config} 
+          />
+        </div>
 
         <div className="main-actions">
           <button className="reset-btn" onClick={() => { setShowModal(true); sounds.playClick(); }}>New Disk</button>
