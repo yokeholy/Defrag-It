@@ -120,7 +120,7 @@ const SectorSlot = memo(({
         setDroppableRef(node);
       }}
       className={`sector ${typeClass} ${defraggedClass} ${connectivityClass}`}
-      style={{ width: 'var(--sector-size)', height: 'var(--sector-size)' }}
+      style={{ width: 'var(--actual-sector-size)', height: 'var(--actual-sector-size)' }}
       {...(sector.type === 'used' && !isGameWon && !isSolving ? { ...attributes, ...listeners } : {})}
     />
   );
@@ -150,10 +150,8 @@ const DiskGrid = memo(({
       className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
       style={{ 
         gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-        position: 'relative',
-        padding: `var(--grid-padding)`,
-        gap: `var(--grid-gap)`,
-        '--sector-size': `${config.sectorSize}px`,
+        '--cols': config.cols,
+        '--max-sector-size': `${config.sectorSize}px`,
         '--grid-gap': `${config.gap}px`,
         '--grid-padding': `${GRID_PADDING}px`
       } as React.CSSProperties}
@@ -178,10 +176,8 @@ const DiskGrid = memo(({
             className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
-              width: `var(--sector-size)`,
-              height: `var(--sector-size)`,
-              top: `calc(var(--grid-padding) + ${row} * (var(--sector-size) + var(--grid-gap)))`,
-              left: `calc(var(--grid-padding) + ${col} * (var(--sector-size) + var(--grid-gap)))`,
+              top: `calc(var(--grid-padding) + ${row} * (var(--actual-sector-size) + var(--grid-gap)))`,
+              left: `calc(var(--grid-padding) + ${col} * (var(--actual-sector-size) + var(--grid-gap)))`,
               pointerEvents: 'none',
               zIndex: 10
             }}
@@ -212,9 +208,7 @@ function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { 
-      activationConstraint: { delay: 200, tolerance: 5 } 
-    }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
@@ -368,7 +362,7 @@ function App() {
       };
       let bestFit = null;
       for (const file of allFiles) {
-        if (file.size <= gapSize) {
+        if (file.start > firstEmptyIdx && file.size <= gapSize) {
           if (!bestFit || file.size > bestFit.size) bestFit = file;
         }
       }
@@ -470,8 +464,8 @@ function App() {
       )}
       <DragOverlay dropAnimation={null}>
         {activeFileData && !isWon ? (
-          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
-            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
+          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--grid-gap)))`, pointerEvents: 'none' }}>
+            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--grid-gap)))` }}>
               {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
             </div>
           </div>
