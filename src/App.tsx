@@ -1,19 +1,4 @@
-import { useState, useMemo, memo, useEffect, useRef } from 'react';
-import {
-  DndContext,
-  pointerWithin,
-  KeyboardSensor,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  DragOverlay,
-  type DragStartEvent,
-  type DragEndEvent,
-  useDroppable,
-  useDraggable,
-} from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { useState, useMemo, memo, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import { sounds } from './sounds';
 
@@ -65,7 +50,6 @@ const generateInitialSectors = (config: DifficultyConfig): Sector[] => {
   while (usedCount < targetUsed) {
     const fileSize = Math.floor(Math.random() * 4) + 1;
     const startIdx = Math.floor(Math.random() * (config.size - fileSize));
-    
     let canPlace = true;
     for (let i = 0; i < fileSize; i++) {
       if (sectors[startIdx + i].type !== 'empty') {
@@ -73,7 +57,6 @@ const generateInitialSectors = (config: DifficultyConfig): Sector[] => {
         break;
       }
     }
-
     if (canPlace) {
       const fileId = `file-${fileCounter++}`;
       for (let i = 0; i < fileSize; i++) {
@@ -84,173 +67,164 @@ const generateInitialSectors = (config: DifficultyConfig): Sector[] => {
     }
     if (fileCounter > config.size) break;
   }
-
   return sectors;
 };
 
-const SectorSlot = memo(({ 
-  sector, 
-  isDefragged, 
-  connectivityClass,
-  isGameWon,
-  isSolving
-}: { 
-  sector: Sector; 
-  isDefragged: boolean; 
-  connectivityClass: string; 
-  isGameWon: boolean; 
-  isSolving: boolean; 
-}) => {
-  const { setNodeRef: setDraggableRef, attributes, listeners } = useDraggable({
-    id: sector.id,
-    disabled: sector.type !== 'used' || isGameWon || isSolving,
-  });
+const hexToRgb = (hex: string) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b };
+};
 
-  const { setNodeRef: setDroppableRef } = useDroppable({
-    id: sector.id,
-    disabled: isGameWon,
-  });
-
-  const typeClass = `sector-${sector.type}`;
-  const defraggedClass = (sector.type === 'used' && isDefragged) ? 'defragged' : '';
-
-  return (
-    <div
-      ref={(node) => {
-        setDraggableRef(node);
-        setDroppableRef(node);
-      }}
-      className={`sector ${typeClass} ${defraggedClass} ${connectivityClass}`}
-      style={{ width: 'var(--actual-sector-size)', height: 'var(--actual-sector-size)' }}
-      {...(sector.type === 'used' && !isGameWon && !isSolving ? { ...attributes, ...listeners } : {})}
-    />
-  );
-});
-
-// Pure grid - only re-renders when the disk state changes
-const DiskGrid = memo(({ 
+const DiskCanvas = memo(({ 
   sectors, 
-  sectorMetadata, 
-  defraggedIndices, 
-  isWon, 
-  isSolving,
-  config
-}: {
-  sectors: Sector[];
-  sectorMetadata: any[];
+  config, 
+  defraggedIndices 
+}: { 
+  sectors: Sector[]; 
+  config: DifficultyConfig; 
   defraggedIndices: Set<number>;
-  isWon: boolean;
-  isSolving: boolean;
-  config: DifficultyConfig;
 }) => {
-  return (
-    <div 
-      className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
-      style={{ 
-        gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-      }}
-    >
-      {sectors.map((sector, index) => (
-        <SectorSlot 
-          key={sector.id} 
-          sector={sector} 
-          isDefragged={defraggedIndices.has(index)}
-          connectivityClass={sectorMetadata[index].connectivityClass}
-          isGameWon={isWon}
-          isSolving={isSolving}
-        />
-      ))}
-    </div>
-  );
-});
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef<number | null>(null);
+  const visualStates = useRef<{ [key: number]: { factor: number } }>({});
+  const lastTimeRef = useRef<number>(performance.now());
 
-// Lightweight highlight component - decoupled from DiskGrid sectors
-const LandingHighlightLayer = memo(({ indices, isValid, config }: { indices: Set<number>; isValid: boolean; config: DifficultyConfig }) => {
-  if (indices.size === 0) return null;
-  return (
-    <div className="highlight-layer">
-      {Array.from(indices).map((idx) => {
-        const row = Math.floor(idx / config.cols);
-        const col = idx % config.cols;
-        return (
-          <div
-            key={`highlight-${idx}`}
-            className={`sector-highlight ${isValid ? 'valid' : 'invalid'}`}
-            style={{
-              position: 'absolute',
-              top: `calc(var(--actual-grid-padding) + ${row} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
-              left: `calc(var(--actual-grid-padding) + ${col} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
-            }}
-          />
-        );
-      })}
-    </div>
-  );
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    const now = performance.now();
+    const dt = now - lastTimeRef.current;
+    lastTimeRef.current = now;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const size = parseFloat(rootStyle.getPropertyValue('--actual-sector-size')) || config.sectorSize;
+    const gap = parseFloat(rootStyle.getPropertyValue('--actual-grid-gap')) || config.gap;
+    const padding = GRID_PADDING;
+    const radius = size * 0.15;
+
+    const width = config.cols * size + (config.cols - 1) * gap + padding * 2;
+    const height = Math.ceil(config.size / config.cols) * size + (Math.ceil(config.size / config.cols) - 1) * gap + padding * 2;
+
+    if (canvas.width !== width * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.scale(dpr, dpr);
+    }
+
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, width, height);
+
+    const blue = hexToRgb('#2563eb');
+    const green = hexToRgb('#10b981');
+
+    let needsMoreFrames = false;
+
+    sectors.forEach((s, i) => {
+      const row = Math.floor(i / config.cols);
+      const col = i % config.cols;
+      const x = padding + col * (size + gap);
+      const y = padding + row * (size + gap);
+
+      if (!visualStates.current[i]) visualStates.current[i] = { factor: defraggedIndices.has(i) ? 1 : 0 };
+      const vs = visualStates.current[i];
+      const target = defraggedIndices.has(i) ? 1 : 0;
+      
+      if (Math.abs(vs.factor - target) > 0.01) {
+        const speed = 0.005 * dt;
+        if (vs.factor < target) vs.factor = Math.min(target, vs.factor + speed);
+        else vs.factor = Math.max(target, vs.factor - speed);
+        needsMoreFrames = true;
+      } else { vs.factor = target; }
+
+      let fill = '#0f172a';
+      let border = 'rgba(255, 255, 255, 0.02)';
+      
+      if (s.type === 'locked') {
+        fill = '#7f1d1d';
+        border = '#b91c1c';
+      } else if (s.type === 'used') {
+        const r = Math.round(blue.r + (green.r - blue.r) * vs.factor);
+        const g = Math.round(blue.g + (green.g - blue.g) * vs.factor);
+        const b = Math.round(blue.b + (green.b - blue.b) * vs.factor);
+        fill = `rgb(${r},${g},${b})`;
+        border = 'rgba(255, 255, 255, 0.1)';
+      }
+
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(x, y, size, size, radius);
+      ctx.fill();
+      ctx.stroke();
+
+      if (s.type === 'locked') {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(x + size * 0.3, y + size * 0.3);
+        ctx.lineTo(x + size * 0.7, y + size * 0.7);
+        ctx.moveTo(x + size * 0.7, y + size * 0.3);
+        ctx.lineTo(x + size * 0.3, y + size * 0.7);
+        ctx.stroke();
+      }
+
+      if (s.fileId && i < sectors.length - 1 && sectors[i + 1].fileId === s.fileId && col < config.cols - 1) {
+        ctx.fillStyle = fill;
+        ctx.fillRect(x + size - 1, y + size * 0.3, gap + 2, size * 0.4);
+      }
+    });
+
+    if (needsMoreFrames) animRef.current = requestAnimationFrame(draw);
+    else animRef.current = null;
+  }, [sectors, config, defraggedIndices]);
+
+  useEffect(() => {
+    lastTimeRef.current = performance.now();
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+    animRef.current = requestAnimationFrame(draw);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [draw]);
+
+  return <canvas ref={canvasRef} className="disk-canvas" />;
 });
 
 function App() {
   const [mode, setMode] = useState<DifficultyMode>('Easy');
   const config = DIFFICULTY_SETTINGS[mode];
   
-  const [sectors, setSectors] = useState<Sector[]>(() => generateInitialSectors(config));
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState(0); 
+  // LOGIC SOURCE OF TRUTH (Accurate Counters)
+  const sectorsRef = useRef<Sector[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  
   const [isWon, setIsWon] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [isSolving, setIsSolving] = useState(false);
   const [solveSpeed, setSolveSpeed] = useState(0.5); 
   const [isMuted, setIsMuted] = useState(false);
 
+  const [activeFileData, setActiveFileData] = useState<{ fileId: string; size: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const dragInfo = useRef({ currentOverIndex: -1 });
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const solveTimerRef = useRef<number | null>(null);
+
   const [moveCount, setMoveCount] = useState(0);
   const [volumeMoved, setVolumeMoved] = useState(0);
 
-  const solveTimerRef = useRef<number | null>(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
   useEffect(() => { sounds.toggle(!isMuted); }, [isMuted]);
   useEffect(() => { if (isWon) sounds.playWin(); }, [isWon]);
-
-  const sectorMetadata = useMemo(() => {
-    return sectors.map((sector, index) => {
-      if (!sector.fileId) return { connectivityClass: '' };
-      const isFirst = index === 0 || sectors[index - 1].fileId !== sector.fileId;
-      const isLast = index === sectors.length - 1 || sectors[index + 1].fileId !== sector.fileId;
-      return {
-        connectivityClass: `file-member ${isFirst ? 'file-start' : ''} ${isLast ? 'file-end' : ''}`
-      };
-    });
-  }, [sectors]);
-
-  const activeFileData = useMemo(() => {
-    if (!activeId) return null;
-    const activeIdx = sectors.findIndex(s => s.id === activeId);
-    const activeSector = sectors[activeIdx];
-    if (!activeSector || !activeSector.fileId) return null;
-    const fileSectors = sectors.filter(s => s.fileId === activeSector.fileId);
-    return { fileId: activeSector.fileId, size: fileSectors.length, currentStartIdx: sectors.indexOf(fileSectors[0]) };
-  }, [activeId, sectors]);
-
-  const landingData = useMemo(() => {
-    if (!activeFileData || !overId) return { indices: new Set<number>(), isValid: false };
-    const targetIdx = sectors.findIndex(s => s.id === overId);
-    const startIdx = targetIdx;
-    const endIdx = startIdx + activeFileData.size - 1;
-    if (startIdx < 0 || endIdx >= config.size) return { indices: new Set<number>(), isValid: false };
-    const indices = new Set<number>();
-    let isValid = true;
-    for (let i = startIdx; i <= endIdx; i++) {
-      indices.add(i);
-      const s = sectors[i];
-      if (s.type !== 'empty') isValid = false;
-    }
-    return { indices, isValid };
-  }, [activeFileData, overId, sectors, config.size]);
 
   const defraggedIndices = useMemo(() => {
     const indices = new Set<number>();
@@ -264,73 +238,169 @@ function App() {
 
   const defragPercentage = useMemo(() => {
     const totalUsed = sectors.filter(s => s.type === 'used').length;
-    if (totalUsed === 0) return 100;
-    return Math.floor((defraggedIndices.size / totalUsed) * 100);
+    return totalUsed === 0 ? 100 : Math.floor((defraggedIndices.size / totalUsed) * 100);
   }, [sectors, defraggedIndices]);
 
-  const checkWinCondition = (currentSectors: Sector[]) => {
-    let foundEmpty = false;
-    for (const s of currentSectors) {
-      if (s.type === 'empty') foundEmpty = true;
-      else if (s.type === 'used' && foundEmpty) return false;
-    }
-    return true;
-  };
+  const initGame = useCallback((newConfig: DifficultyConfig) => {
+    const initial = generateInitialSectors(newConfig);
+    sectorsRef.current = initial;
+    setSectors(initial);
+    setIsWon(false);
+    setIsSolving(false);
+    setMoveCount(0);
+    setVolumeMoved(0);
+    setShowModal(false);
+  }, []);
 
-  const executeMove = (fileId: string, targetStartIdx: number) => {
-    const fileSectors = sectors.filter(s => s.fileId === fileId);
+  useEffect(() => { initGame(config); }, [config, initGame]);
+
+  const executeMove = useCallback((fileId: string, targetStartIdx: number) => {
+    const prev = sectorsRef.current;
+    const fileSectors = prev.filter(s => s.fileId === fileId);
     if (fileSectors.length === 0) return;
-    const currentIdx = sectors.indexOf(fileSectors[0]);
+    const currentIdx = prev.indexOf(fileSectors[0]);
     if (currentIdx === targetStartIdx) return;
     const size = fileSectors.length;
 
-    setSectors((prev) => {
-      const newSectors = prev.map(s => ({ ...s }));
-      prev.forEach((s, idx) => {
-        if (s.fileId === fileId) {
-          newSectors[idx].type = 'empty';
-          delete newSectors[idx].fileId;
-        }
-      });
-      for (let i = 0; i < size; i++) {
-        newSectors[targetStartIdx + i].type = 'used';
-        newSectors[targetStartIdx + i].fileId = fileId;
+    // Logic Update (Single source of truth)
+    const newSectors = prev.map(s => ({ ...s }));
+    prev.forEach((s, idx) => {
+      if (s.fileId === fileId) {
+        newSectors[idx].type = 'empty';
+        delete newSectors[idx].fileId;
       }
-      if (checkWinCondition(newSectors)) setIsWon(true);
-      return newSectors;
     });
+    for (let i = 0; i < size; i++) {
+      newSectors[targetStartIdx + i].type = 'used';
+      newSectors[targetStartIdx + i].fileId = fileId;
+    }
+    
+    // Check Win
+    let foundEmpty = false;
+    let won = true;
+    for (const s of newSectors) {
+      if (s.type === 'empty') foundEmpty = true;
+      else if (s.type === 'used' && foundEmpty) { won = false; break; }
+    }
 
+    // Single-shot state updates
+    sectorsRef.current = newSectors;
+    setSectors(newSectors);
     setMoveCount(m => m + 1);
     setVolumeMoved(v => v + size);
+    if (won) setIsWon(true);
     sounds.playDrop();
+  }, []);
+
+  const getIndexFromPointer = (clientX: number, clientY: number) => {
+    if (!gridRef.current) return -1;
+    const rect = gridRef.current.getBoundingClientRect();
+    const rootStyle = getComputedStyle(document.documentElement);
+    const size = parseFloat(rootStyle.getPropertyValue('--actual-sector-size')) || config.sectorSize;
+    const gap = parseFloat(rootStyle.getPropertyValue('--actual-grid-gap')) || config.gap;
+    const padding = GRID_PADDING;
+
+    const x = clientX - rect.left - padding;
+    const y = clientY - rect.top - padding;
+
+    const col = Math.floor(x / (size + gap));
+    const row = Math.floor(y / (size + gap));
+    
+    if (col < 0 || col >= config.cols || x % (size + gap) > size || y % (size + gap) > size) return -1;
+    const index = row * config.cols + col;
+    if (index < 0 || index >= sectorsRef.current.length) return -1;
+    return index;
   };
 
-  const handleDragStart = (event: DragStartEvent) => {
-    const id = event.active.id as string;
-    setActiveId(id);
-    const activeIdx = sectors.findIndex(s => s.id === id);
-    const activeSector = sectors[activeIdx];
-    const firstIdx = sectors.findIndex(s => s.fileId === activeSector.fileId);
-    setDragOffset(activeIdx - firstIdx);
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (isWon || isSolving) return;
+    const index = getIndexFromPointer(e.clientX, e.clientY);
+    if (index === -1) return;
+
+    const sector = sectorsRef.current[index];
+    if (sector.type !== 'used') return;
+
+    const fileSectors = sectorsRef.current.filter(s => s.fileId === sector.fileId);
+    const firstIdx = sectorsRef.current.indexOf(fileSectors[0]);
+
+    setActiveFileData({ fileId: sector.fileId!, size: fileSectors.length });
+    setDragOffset(index - firstIdx);
+    setIsDragging(true);
     sounds.playPickup();
-  };
 
-  const handleDragOver = (event: any) => { setOverId(event.over?.id || null); };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { over } = event;
-    const currentLanding = landingData;
-    const movingFile = activeFileData;
-    if (over && currentLanding.isValid && movingFile) {
-      const targetStartIdx = sectors.findIndex(s => s.id === over.id);
-      executeMove(movingFile.fileId, targetStartIdx);
-    } else if (over && !currentLanding.isValid) {
-      sounds.playError();
+    if (overlayRef.current) {
+      overlayRef.current.style.display = 'flex';
+      overlayRef.current.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
     }
-    setActiveId(null);
-    setOverId(null);
-    setDragOffset(0);
   };
+
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDragging || !activeFileData) return;
+      if (overlayRef.current) overlayRef.current.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+
+      const overIndex = getIndexFromPointer(e.clientX, e.clientY);
+      if (overIndex === dragInfo.current.currentOverIndex) return;
+      dragInfo.current.currentOverIndex = overIndex;
+
+      if (!highlightRef.current) return;
+      if (overIndex === -1) { highlightRef.current.style.display = 'none'; return; }
+
+      const targetStartIdx = overIndex - dragOffset;
+      const endIdx = targetStartIdx + activeFileData.size - 1;
+      
+      let isValid = true;
+      if (targetStartIdx < 0 || endIdx >= config.size) {
+        isValid = false;
+      } else {
+        for (let i = targetStartIdx; i <= endIdx; i++) {
+          if (sectorsRef.current[i].type !== 'empty') { isValid = false; break; }
+        }
+      }
+
+      const hRow = Math.floor(targetStartIdx / config.cols);
+      const hCol = targetStartIdx % config.cols;
+      highlightRef.current.style.display = 'block';
+      highlightRef.current.style.width = `calc(${activeFileData.size} * var(--actual-sector-size) + (${activeFileData.size - 1} * var(--actual-grid-gap)))`;
+      highlightRef.current.className = `landing-highlight ${isValid ? 'valid' : 'invalid'}`;
+      highlightRef.current.style.transform = `translate(
+        calc(var(--actual-grid-padding) + ${hCol} * (var(--actual-sector-size) + var(--actual-grid-gap))),
+        calc(var(--actual-grid-padding) + ${hRow} * (var(--actual-sector-size) + var(--actual-grid-gap)))
+      )`;
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (!isDragging || !activeFileData) return;
+      const overIndex = getIndexFromPointer(e.clientX, e.clientY);
+      const targetIdx = overIndex === -1 ? -1 : overIndex - dragOffset;
+      
+      let isValid = false;
+      if (targetIdx !== -1) {
+        const endIdx = targetIdx + activeFileData.size - 1;
+        if (targetIdx >= 0 && endIdx < config.size) {
+          isValid = true;
+          for (let i = targetIdx; i <= endIdx; i++) {
+            if (sectorsRef.current[i].type !== 'empty') { isValid = false; break; }
+          }
+        }
+      }
+      if (isValid) executeMove(activeFileData.fileId, targetIdx);
+      else if (overIndex !== -1) sounds.playError();
+
+      setIsDragging(false);
+      setActiveFileData(null);
+      dragInfo.current.currentOverIndex = -1;
+      if (overlayRef.current) overlayRef.current.style.display = 'none';
+      if (highlightRef.current) highlightRef.current.style.display = 'none';
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isDragging, activeFileData, dragOffset, config, executeMove]);
 
   const startAutoSolve = () => { if (!isWon) setIsSolving(true); sounds.playClick(); };
 
@@ -341,24 +411,25 @@ function App() {
       return;
     }
     const findNextMove = () => {
-      const firstEmptyIdx = sectors.findIndex(s => s.type === 'empty');
+      const currentSectors = sectorsRef.current;
+      const firstEmptyIdx = currentSectors.findIndex(s => s.type === 'empty');
       if (firstEmptyIdx === -1) return null;
       let gapSize = 0;
-      for (let i = firstEmptyIdx; i < sectors.length; i++) {
-        if (sectors[i].type === 'empty') gapSize++; else break;
+      for (let i = firstEmptyIdx; i < currentSectors.length; i++) {
+        if (currentSectors[i].type === 'empty') gapSize++; else break;
       }
       const allFiles: { fileId: string; size: number; start: number }[] = [];
       const seenFiles = new Set<string>();
-      sectors.forEach((s, index) => {
+      currentSectors.forEach((s, index) => {
         if (s.type === 'used' && s.fileId && !seenFiles.has(s.fileId)) {
           seenFiles.add(s.fileId);
-          const fileSectors = sectors.filter(item => item.fileId === s.fileId);
+          const fileSectors = currentSectors.filter(item => item.fileId === s.fileId);
           allFiles.push({ fileId: s.fileId, size: fileSectors.length, start: index });
         }
       });
       const canFit = (size: number, targetIdx: number) => {
         for (let j = 0; j < size; j++) {
-          if (targetIdx + j >= sectors.length || sectors[targetIdx + j].type !== 'empty') return false;
+          if (targetIdx + j >= currentSectors.length || currentSectors[targetIdx + j].type !== 'empty') return false;
         }
         return true;
       };
@@ -372,13 +443,13 @@ function App() {
       const blockerIdx = firstEmptyIdx + gapSize;
       const blocker = allFiles.find(f => f.start === blockerIdx);
       if (blocker) {
-        for (let i = sectors.length - blocker.size; i > blocker.start; i--) {
+        for (let i = currentSectors.length - blocker.size; i > blocker.start; i--) {
           if (canFit(blocker.size, i)) return { fileId: blocker.fileId, targetIdx: i };
         }
       }
       const reversed = [...allFiles].reverse();
       for (const file of reversed) {
-        for (let i = sectors.length - file.size; i >= 0; i--) {
+        for (let i = currentSectors.length - file.size; i >= 0; i--) {
           if (i !== file.start && canFit(file.size, i)) return { fileId: file.fileId, targetIdx: i };
         }
       }
@@ -391,124 +462,86 @@ function App() {
       setIsSolving(false);
     }
     return () => { if (solveTimerRef.current) clearTimeout(solveTimerRef.current); };
-  }, [isSolving, sectors, isWon, solveSpeed, defraggedIndices]);
+  }, [isSolving, isWon, solveSpeed, executeMove, sectors]);
 
   const switchDifficulty = (newMode: DifficultyMode) => {
-    const newConfig = DIFFICULTY_SETTINGS[newMode];
     setMode(newMode);
-    setSectors(generateInitialSectors(newConfig));
-    setIsWon(false);
-    setIsSolving(false);
-    setMoveCount(0);
-    setVolumeMoved(0);
-    setShowModal(false);
-    sounds.playClick();
-  };
-
-  const resetAndShuffle = () => {
-    setSectors(generateInitialSectors(config));
-    setIsWon(false);
-    setIsSolving(false);
-    setMoveCount(0);
-    setVolumeMoved(0);
-    setShowModal(false);
     sounds.playClick();
   };
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
+    <div 
+      className={`game-container ${isWon ? 'game-won' : ''} ${isDragging ? 'is-dragging' : ''} ${isSolving ? 'is-solving' : ''}`}
+      style={{
+        '--cols': config.cols,
+        '--max-sector-size': `${config.sectorSize}px`,
+        '--actual-grid-gap': `${config.gap}px`,
+        '--actual-grid-padding': `${GRID_PADDING}px`,
+        cursor: isDragging ? 'grabbing' : 'default'
+      } as React.CSSProperties}
     >
-      <div 
-        className={`game-container ${isWon ? 'game-won' : ''} ${activeId ? 'is-dragging' : ''} ${isSolving ? 'is-solving' : ''}`}
-        style={{
-          '--cols': config.cols,
-          '--max-sector-size': `${config.sectorSize}px`,
-          '--actual-grid-gap': `${config.gap}px`,
-          '--actual-grid-padding': `${GRID_PADDING}px`
-        } as React.CSSProperties}
-      >
-        <header>
-          <div className="header-top">
-            <h1>defragIt <small>v1.3</small></h1>
-            <button className="mute-btn" onClick={() => setIsMuted(!isMuted)}>
-              {isMuted ? '🔇' : '🔊'}
-            </button>
-          </div>
-        </header>
-        <div className="stats-bar">
-          <div className="stat-item"><span className="stat-label">Moves</span><span className="stat-value">{moveCount}</span></div>
-          <div className="stat-item"><span className="stat-label">Volume</span><span className="stat-value">{volumeMoved}</span></div>
+      <header>
+        <div className="header-top">
+          <h1 className="game-title">defragIt <small>v1.3</small></h1>
         </div>
-        <div className={`status ${isWon ? 'won' : ''}`}>
-          {isWon ? 'DISK OPTIMIZED!' : isSolving ? 'AUTO-SOLVING...' : `Optimization: ${defragPercentage}%`}
-          <div className="progress-bar-container"><div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div></div>
-        </div>
-        
-        <div className="grid-wrapper">
-          <DiskGrid 
-            sectors={sectors} 
-            sectorMetadata={sectorMetadata} 
-            defraggedIndices={defraggedIndices} 
-            isWon={isWon} 
-            isSolving={isSolving} 
-            config={config} 
-          />
-          <LandingHighlightLayer 
-            indices={landingData.indices} 
-            isValid={landingData.isValid} 
-            config={config} 
-          />
-        </div>
+      </header>
+      <div className="stats-bar">
+        <div className="stat-item"><span className="stat-label">Moves</span><span className="stat-value">{moveCount}</span></div>
+        <div className="stat-item"><span className="stat-label">Volume</span><span className="stat-value">{volumeMoved}</span></div>
+      </div>
+      <div className={`status ${isWon ? 'won' : ''}`}>
+        {isWon ? 'DISK OPTIMIZED!' : isSolving ? 'AUTO-SOLVING...' : `Optimization: ${defragPercentage}%`}
+        <div className="progress-bar-container"><div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div></div>
+      </div>
+      
+      <div className="grid-wrapper" ref={gridRef} onPointerDown={handlePointerDown}>
+        <DiskCanvas sectors={sectors} config={config} defraggedIndices={defraggedIndices} />
+        <div ref={highlightRef} className="landing-highlight" style={{ display: 'none' }} />
+      </div>
 
-        <div className="main-actions">
-          <button className="reset-btn" onClick={() => { setShowModal(true); sounds.playClick(); }}>New Disk</button>
-          {!isWon && (
-            <div className="solve-group">
-              <button className={`solve-btn ${isSolving ? 'active' : ''}`} onClick={isSolving ? () => { setIsSolving(false); sounds.playClick(); } : startAutoSolve}>
-                {isSolving ? 'Stop' : 'Auto-Solve'}
-              </button>
-              <div className="speed-control">
-                <span className="speed-label">{solveSpeed}s</span>
-                <input type="range" min="0.1" max="1.0" step="0.1" value={solveSpeed} onChange={(e) => setSolveSpeed(parseFloat(e.target.value))} />
-              </div>
-            </div>
-          )}
-        </div>
-        <footer>
-          <div className="legend">
-            <div className="legend-item"><div className="sector sector-used defragged" style={{ width: 14, height: 14 }} /> Defragged</div>
-            <div className="legend-item"><div className="sector sector-used" style={{ width: 14, height: 14 }} /> Fragmented</div>
-            <div className="legend-item"><div className="sector sector-locked" style={{ width: 14, height: 14 }} /> Locked</div>
-          </div>
-        </footer>
-
-        {showModal && (
-          <div className="modal-overlay" onClick={() => setShowModal(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <h2>Select Difficulty</h2>
-              <div className="modal-actions">{(['Easy', 'Hard', 'Nightmare'] as DifficultyMode[]).map((m) => (<button key={m} className={`mode-btn ${mode === m ? 'active' : ''}`} onClick={() => switchDifficulty(m)}>{m}</button>))}</div>
-              <button className="close-modal" onClick={resetAndShuffle}>Just Restart Level</button>
-              <button className="close-modal" onClick={() => { setShowModal(false); sounds.playClick(); }}>Close</button>
+      <div className="main-actions-row">
+        <button className="action-btn secondary" onClick={() => { setShowModal(true); sounds.playClick(); }}>New Disk</button>
+        {!isWon && (
+          <div className="solve-controls">
+            <button className={`action-btn primary ${isSolving ? 'active' : ''}`} onClick={isSolving ? () => { setIsSolving(false); sounds.playClick(); } : startAutoSolve}>{isSolving ? 'Stop' : 'Auto-Solve'}</button>
+            <div className="speed-group">
+              <span className="speed-tag">{solveSpeed}s</span>
+              <input type="range" min="0.1" max="1.0" step="0.1" value={solveSpeed} onChange={(e) => setSolveSpeed(parseFloat(e.target.value))} />
             </div>
           </div>
         )}
-
-        <DragOverlay dropAnimation={null}>
-          {activeId && !isWon && activeFileData ? (
-            <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
-              <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
-                {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
-              </div>
-            </div>
-          ) : null}
-        </DragOverlay>
       </div>
-    </DndContext>
+
+      <footer>
+        <div className="legend">
+          <div className="legend-item"><div className="sector-swatch defragged" /> Defragged</div>
+          <div className="legend-item"><div className="sector-swatch fragmented" /> Fragmented</div>
+          <div className="legend-item"><div className="sector-swatch locked" /> Locked</div>
+        </div>
+        <button className="mute-btn-footer" onClick={() => setIsMuted(!isMuted)}>{isMuted ? '🔇' : '🔊'}</button>
+      </footer>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Select Difficulty</h2>
+            <div className="modal-actions">{(['Easy', 'Hard', 'Nightmare'] as DifficultyMode[]).map((m) => (<button key={m} className={`mode-btn ${mode === m ? 'active' : ''}`} onClick={() => switchDifficulty(m)}>{m}</button>))}</div>
+            <button className="close-modal" onClick={() => initGame(config)}>Just Restart Level</button>
+            <button className="close-modal" onClick={() => { setShowModal(false); sounds.playClick(); }}>Close</button>
+          </div>
+        </div>
+      )}
+
+      <div ref={overlayRef} className="custom-drag-overlay" style={{ display: 'none', cursor: 'grabbing' }}>
+        {activeFileData && (
+          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
+            <div className="file-dragging-overlay" style={{ display: 'flex', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * var(--actual-sector-size) + (${activeFileData.size - 1} * var(--actual-grid-gap)))` }}>
+              {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)`, borderRadius: `calc(var(--actual-sector-size) * 0.15)` }} />))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
