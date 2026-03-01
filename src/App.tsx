@@ -151,8 +151,8 @@ const DiskGrid = memo(({
         gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
         '--cols': config.cols,
         '--max-sector-size': `${config.sectorSize}px`,
-        '--grid-gap': `${config.gap}px`,
-        '--grid-padding': `${GRID_PADDING}px`
+        '--actual-grid-gap': `${config.gap}px`,
+        '--actual-grid-padding': `${GRID_PADDING}px`
       } as React.CSSProperties}
     >
       {sectors.map((sector, index) => (
@@ -175,9 +175,8 @@ const DiskGrid = memo(({
             className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
-              // Use the calculated --size from CSS
-              top: `calc(var(--grid-padding) + ${row} * (var(--size) + var(--grid-gap)))`,
-              left: `calc(var(--grid-padding) + ${col} * (var(--size) + var(--grid-gap)))`,
+              top: `calc(var(--padding) + ${row} * (var(--size) + var(--gap)))`,
+              left: `calc(var(--padding) + ${col} * (var(--size) + var(--gap)))`,
               pointerEvents: 'none',
               zIndex: 10
             }}
@@ -208,9 +207,7 @@ function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { 
-      activationConstraint: { delay: 200, tolerance: 5 } 
-    }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
@@ -479,8 +476,8 @@ function App() {
 
       <DragOverlay dropAnimation={null}>
         {activeId && !isWon && activeFileData ? (
-          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--size) + var(--grid-gap)))`, pointerEvents: 'none' }}>
-            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--grid-gap)`, width: `calc(${activeFileData.size} * (var(--size) + var(--grid-gap)))` }}>
+          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--size) + var(--gap)))`, pointerEvents: 'none' }}>
+            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--gap)`, width: `calc(${activeFileData.size} * (var(--size) + var(--gap)))` }}>
               {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--size)`, height: `var(--size)` }} />))}
             </div>
           </div>
