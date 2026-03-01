@@ -19,6 +19,11 @@ body {
 }
 
 .game-container {
+  /* RESPONSIVE SCALING ENGINE */
+  --available-width: calc(100vw - (var(--padding) * 2) - 40px);
+  --calculated-size: calc((var(--available-width) - (var(--gap) * (var(--cols) - 1))) / var(--cols));
+  --size: min(var(--max-sector-size), var(--calculated-size));
+
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -40,7 +45,7 @@ body {
 }
 
 header h1 {
-  font-size: clamp(1.5rem, 8vw, 3.5rem);
+  font-size: clamp(1.5rem, 8vw, 3rem);
   margin: 0;
   color: #38bdf8;
   text-transform: uppercase;
@@ -122,15 +127,6 @@ header h1 small {
 }
 
 .disk-grid {
-  /* THE FIX: Moved calculation logic here so it can read the inline --cols and --max-sector-size */
-  --gap: var(--actual-grid-gap, 4px);
-  --padding: var(--actual-grid-padding, 8px);
-  --available-width: calc(100vw - (var(--padding) * 2) - 40px);
-  --calculated-size: calc((var(--available-width) - (var(--gap) * (var(--cols) - 1))) / var(--cols));
-  
-  /* The size used by every sector and highlight in this grid */
-  --size: min(var(--max-sector-size, 42px), var(--calculated-size));
-
   display: grid;
   background-color: #0f172a;
   border-radius: 8px;
@@ -144,6 +140,7 @@ header h1 small {
   border: 2px solid #1e293b;
   padding: var(--padding);
   gap: var(--gap);
+  position: relative; /* REQUIRED for absolute highlight positioning */
 }
 
 .locked-grid {

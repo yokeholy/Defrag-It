@@ -147,13 +147,7 @@ const DiskGrid = memo(({
   return (
     <div 
       className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
-      style={{ 
-        gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-        '--cols': config.cols,
-        '--max-sector-size': `${config.sectorSize}px`,
-        '--actual-grid-gap': `${config.gap}px`,
-        '--actual-grid-padding': `${GRID_PADDING}px`
-      } as React.CSSProperties}
+      style={{ gridTemplateColumns: `repeat(${config.cols}, 1fr)` }}
     >
       {sectors.map((sector, index) => (
         <SectorSlot 
@@ -418,7 +412,15 @@ function App() {
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className={`game-container ${isWon ? 'game-won' : ''} ${activeId ? 'is-dragging' : ''} ${isSolving ? 'is-solving' : ''}`}>
+      <div 
+        className={`game-container ${isWon ? 'game-won' : ''} ${activeId ? 'is-dragging' : ''} ${isSolving ? 'is-solving' : ''}`}
+        style={{
+          '--cols': config.cols,
+          '--max-sector-size': `${config.sectorSize}px`,
+          '--gap': `${config.gap}px`,
+          '--padding': `${GRID_PADDING}px`
+        } as React.CSSProperties}
+      >
         <header><h1>defragIt <small>v1.3</small></h1></header>
         <div className="stats-bar">
           <div className="stat-item"><span className="stat-label">Moves</span><span className="stat-value">{moveCount}</span></div>
@@ -461,28 +463,28 @@ function App() {
             <div className="legend-item"><div className="sector sector-locked" style={{ width: 14, height: 14 }} /> Locked</div>
           </div>
         </footer>
-      </div>
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Select Difficulty</h2>
-            <div className="modal-actions">{(['Easy', 'Hard', 'Nightmare'] as DifficultyMode[]).map((m) => (<button key={m} className={`mode-btn ${mode === m ? 'active' : ''}`} onClick={() => switchDifficulty(m)}>{m}</button>))}</div>
-            <button className="close-modal" onClick={resetAndShuffle}>Just Restart Level</button>
-            <button className="close-modal" onClick={() => setShowModal(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      <DragOverlay dropAnimation={null}>
-        {activeId && !isWon && activeFileData ? (
-          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--size) + var(--gap)))`, pointerEvents: 'none' }}>
-            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--gap)`, width: `calc(${activeFileData.size} * (var(--size) + var(--gap)))` }}>
-              {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--size)`, height: `var(--size)` }} />))}
+        {showModal && (
+          <div className="modal-overlay" onClick={() => setShowModal(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h2>Select Difficulty</h2>
+              <div className="modal-actions">{(['Easy', 'Hard', 'Nightmare'] as DifficultyMode[]).map((m) => (<button key={m} className={`mode-btn ${mode === m ? 'active' : ''}`} onClick={() => switchDifficulty(m)}>{m}</button>))}</div>
+              <button className="close-modal" onClick={resetAndShuffle}>Just Restart Level</button>
+              <button className="close-modal" onClick={() => setShowModal(false)}>Close</button>
             </div>
           </div>
-        ) : null}
-      </DragOverlay>
+        )}
+
+        <DragOverlay dropAnimation={null}>
+          {activeId && !isWon && activeFileData ? (
+            <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--size) + var(--gap)))`, pointerEvents: 'none' }}>
+              <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--gap)`, width: `calc(${activeFileData.size} * (var(--size) + var(--gap)))` }}>
+                {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--size)`, height: `var(--size)` }} />))}
+              </div>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </div>
     </DndContext>
   );
 }
