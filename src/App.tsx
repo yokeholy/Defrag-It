@@ -150,9 +150,10 @@ const DiskGrid = memo(({
       className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
       style={{ 
         gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-        '--actual-sector-size': `${config.sectorSize}px`,
-        '--actual-grid-gap': `${config.gap}px`,
-        '--actual-grid-padding': `${GRID_PADDING}px`
+        '--cols': config.cols,
+        '--max-sector-size': `${config.sectorSize}px`,
+        '--config-grid-gap': `${config.gap}px`,
+        '--config-grid-padding': `${GRID_PADDING}px`
       } as React.CSSProperties}
     >
       {sectors.map((sector, index) => (
@@ -237,7 +238,6 @@ function App() {
     const startIdx = targetIdx;
     const endIdx = startIdx + activeFileData.size - 1;
     if (startIdx < 0 || endIdx >= config.size) return { indices: new Set<number>(), isValid: false };
-    
     const indices = new Set<number>();
     let isValid = true;
     for (let i = startIdx; i <= endIdx; i++) {
@@ -475,7 +475,7 @@ function App() {
       )}
 
       <DragOverlay dropAnimation={null}>
-        {activeFileData && !isWon ? (
+        {activeId && !isWon && activeFileData ? (
           <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
             <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
               {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
