@@ -1,73 +1,65 @@
-# React + TypeScript + Vite
+# defragIt
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A vibrant, retro-inspired manual disk defragmentation game built with React, TypeScript, and Vite. Inspired by the classic Windows Defrag tool, this game challenges you to optimize your disk by manually relocating fragmented files into contiguous blocks.
 
-Currently, two official plugins are available:
+## 🚀 Version 1.3 - Current Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### 🧩 Game Mechanics
+- **Manual Defragmentation**: Drag fragmented (blue) files into empty (grey) spaces to defragment them.
+- **Multi-Sector Files**: Files vary in size (1 to 4 contiguous sectors). Dragging any part of a file moves the entire block.
+- **Strict Validation**: Files can only be placed in completely free contiguous space. No overlaps allowed!
+- **Dynamic Visuals**: Sectors turn green once they are part of a contiguous defragmented block at the front of the disk.
+- **Visual Connectivity**: Connected sectors are visually linked with data "bridges" to show file integrity.
 
-## React Compiler
+### 🎮 Difficulty Modes
+Choose your challenge via the **New Disk** modal:
+- **Easy**: 10x10 grid (100 sectors). Perfect for learning the mechanics.
+- **Hard**: 20x20 grid (400 sectors). Increased fragmentation and tighter space.
+- **Nightmare**: 30x30 grid (900 sectors). A high-density matrix for true optimization experts.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🤖 Professional Auto-Solver
+Get stuck? Use the AI auto-solver:
+- **Sequential Visualization**: Watch the computer solve the disk step-by-step.
+- **100% Success Strategy**: Uses advanced "Best Fit" and "Blocker Evacuation" logic to ensure every disk can be optimized without loops.
+- **Adjustable Speed**: Real-time speed control slider ranging from 0.1s to 1.0s per step.
 
-## Expanding the ESLint configuration
+### 📊 Real-time Statistics
+- **Optimization Percentage**: Track your progress with a real-time defrag percentage and progress bar.
+- **Move Counter**: Tracks total successful file relocations.
+- **Volume Counter**: Tracks the total number of sectors moved.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🛠️ Tech Stack
+- **Framework**: React 19
+- **Language**: TypeScript
+- **Drag & Drop**: `@dnd-kit/core`
+- **Build Tool**: Vite
+- **Styling**: Vanilla CSS (Vibrant Dark Mode)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## 📦 Getting Started
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Prerequisites
+- Node.js (v18+)
+- npm or yarn
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone git@github.com:yokeholy/Defrag-It.git
+   cd Defrag-It
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+### Building for Production
+```bash
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## 📜 License
+MIT
