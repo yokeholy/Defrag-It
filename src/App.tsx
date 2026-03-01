@@ -1,4 +1,4 @@
-import React, { useState, useMemo, memo, useEffect, useRef } from 'react';
+import { useState, useMemo, memo, useEffect, useRef } from 'react';
 import {
   DndContext,
   pointerWithin,
