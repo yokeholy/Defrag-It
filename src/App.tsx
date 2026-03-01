@@ -4,6 +4,7 @@ import {
   pointerWithin,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -49,9 +50,9 @@ const generateInitialSectors = (config: DifficultyConfig): Sector[] => {
 
   let lockedCount = Math.floor(config.size * config.lockedRatio);
   while (lockedCount > 0) {
-    const idx = Math.floor(Math.random() * config.size);
-    if (sectors[idx].type === 'empty') {
-      sectors[idx].type = 'locked';
+    const safeIdx = Math.floor(Math.random() * config.size);
+    if (sectors[safeIdx].type === 'empty') {
+      sectors[safeIdx].type = 'locked';
       lockedCount--;
     }
   }
@@ -91,15 +92,13 @@ const SectorSlot = memo(({
   isDefragged, 
   connectivityClass,
   isGameWon,
-  isSolving,
-  size
+  isSolving
 }: { 
   sector: Sector; 
   isDefragged: boolean; 
   connectivityClass: string; 
   isGameWon: boolean; 
   isSolving: boolean; 
-  size: number;
 }) => {
   const { setNodeRef: setDraggableRef, attributes, listeners } = useDraggable({
     id: sector.id,
@@ -121,7 +120,7 @@ const SectorSlot = memo(({
         setDroppableRef(node);
       }}
       className={`sector ${typeClass} ${defraggedClass} ${connectivityClass}`}
-      style={{ width: `${size}px`, height: `${size}px` }}
+      style={{ width: 'var(--sector-size)', height: 'var(--sector-size)' }}
       {...(sector.type === 'used' && !isGameWon && !isSolving ? { ...attributes, ...listeners } : {})}
     />
   );
@@ -152,9 +151,12 @@ const DiskGrid = memo(({
       style={{ 
         gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
         position: 'relative',
-        padding: `${GRID_PADDING}px`,
-        gap: `${config.gap}px`
-      }}
+        padding: `var(--grid-padding)`,
+        gap: `var(--grid-gap)`,
+        '--sector-size': `${config.sectorSize}px`,
+        '--grid-gap': `${config.gap}px`,
+        '--grid-padding': `${GRID_PADDING}px`
+      } as React.CSSProperties}
     >
       {sectors.map((sector, index) => (
         <SectorSlot 
@@ -164,7 +166,6 @@ const DiskGrid = memo(({
           connectivityClass={sectorMetadata[index].connectivityClass}
           isGameWon={isWon}
           isSolving={isSolving}
-          size={config.sectorSize}
         />
       ))}
       
@@ -177,10 +178,10 @@ const DiskGrid = memo(({
             className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
-              width: `${config.sectorSize}px`,
-              height: `${config.sectorSize}px`,
-              top: `${GRID_PADDING + row * (config.sectorSize + config.gap)}px`,
-              left: `${GRID_PADDING + col * (config.sectorSize + config.gap)}px`,
+              width: `var(--sector-size)`,
+              height: `var(--sector-size)`,
+              top: `calc(var(--grid-padding) + ${row} * (var(--sector-size) + var(--grid-gap)))`,
+              left: `calc(var(--grid-padding) + ${col} * (var(--sector-size) + var(--grid-gap)))`,
               pointerEvents: 'none',
               zIndex: 10
             }}
@@ -211,6 +212,9 @@ function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { 
+      activationConstraint: { delay: 200, tolerance: 5 } 
+    }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
@@ -277,16 +281,12 @@ function App() {
   };
 
   const executeMove = (fileId: string, targetStartIdx: number) => {
-    // 1. Get info about the file from CURRENT state
     const fileSectors = sectors.filter(s => s.fileId === fileId);
     if (fileSectors.length === 0) return;
-    
     const currentIdx = sectors.indexOf(fileSectors[0]);
-    if (currentIdx === targetStartIdx) return; // Ignore if no position change
-
+    if (currentIdx === targetStartIdx) return;
     const size = fileSectors.length;
 
-    // 2. Perform disk update
     setSectors((prev) => {
       const newSectors = prev.map(s => ({ ...s }));
       prev.forEach((s, idx) => {
@@ -299,12 +299,10 @@ function App() {
         newSectors[targetStartIdx + i].type = 'used';
         newSectors[targetStartIdx + i].fileId = fileId;
       }
-      
       if (checkWinCondition(newSectors)) setIsWon(true);
       return newSectors;
     });
 
-    // 3. Update Stats (using calculated 'size' before the async state update)
     setMoveCount(m => m + 1);
     setVolumeMoved(v => v + size);
   };
@@ -326,12 +324,10 @@ function App() {
     const { over } = event;
     const currentLanding = landingData;
     const movingFile = activeFileData;
-
     if (over && currentLanding.isValid && movingFile) {
       const targetStartIdx = sectors.findIndex(s => s.id === over.id);
       executeMove(movingFile.fileId, targetStartIdx);
     }
-
     setActiveId(null);
     setOverId(null);
     setDragOffset(0);
@@ -342,53 +338,41 @@ function App() {
     setIsSolving(true);
   };
 
-  // 100% SUCCESS RATE BEST FIT SOLVER
   useEffect(() => {
     if (!isSolving || isWon) {
       if (solveTimerRef.current) clearTimeout(solveTimerRef.current);
       if (isWon) setIsSolving(false);
       return;
     }
-
     const findNextMove = () => {
       const firstEmptyIdx = sectors.findIndex(s => s.type === 'empty');
       if (firstEmptyIdx === -1) return null;
-
       let gapSize = 0;
       for (let i = firstEmptyIdx; i < sectors.length; i++) {
         if (sectors[i].type === 'empty') gapSize++; else break;
       }
-
       const allFiles: { fileId: string; size: number; start: number }[] = [];
       const seenFiles = new Set<string>();
-      const searchStart = firstEmptyIdx + gapSize;
-
       sectors.forEach((s, index) => {
-        if (index >= searchStart && s.type === 'used' && s.fileId && !seenFiles.has(s.fileId)) {
+        if (s.type === 'used' && s.fileId && !seenFiles.has(s.fileId)) {
           seenFiles.add(s.fileId);
           const fileSectors = sectors.filter(item => item.fileId === s.fileId);
           allFiles.push({ fileId: s.fileId, size: fileSectors.length, start: index });
         }
       });
-
       const canFit = (size: number, targetIdx: number) => {
         for (let j = 0; j < size; j++) {
           if (targetIdx + j >= sectors.length || sectors[targetIdx + j].type !== 'empty') return false;
         }
         return true;
       };
-
       let bestFit = null;
       for (const file of allFiles) {
         if (file.size <= gapSize) {
-          if (!bestFit || file.size > bestFit.size) {
-            bestFit = file;
-          }
+          if (!bestFit || file.size > bestFit.size) bestFit = file;
         }
       }
-
       if (bestFit) return { fileId: bestFit.fileId, targetIdx: firstEmptyIdx };
-
       const blockerIdx = firstEmptyIdx + gapSize;
       const blocker = allFiles.find(f => f.start === blockerIdx);
       if (blocker) {
@@ -396,26 +380,22 @@ function App() {
           if (canFit(blocker.size, i)) return { fileId: blocker.fileId, targetIdx: i };
         }
       }
-
-      if (blocker) {
-        for (let i = blocker.start + 1; i <= sectors.length - blocker.size; i++) {
-           if (canFit(blocker.size, i)) return { fileId: blocker.fileId, targetIdx: i };
+      const reversed = [...allFiles].reverse();
+      for (const file of reversed) {
+        for (let i = sectors.length - file.size; i >= 0; i--) {
+          if (i !== file.start && canFit(file.size, i)) return { fileId: file.fileId, targetIdx: i };
         }
       }
-
       return null;
     };
-
     const nextMove = findNextMove();
     if (nextMove) {
-      solveTimerRef.current = window.setTimeout(() => { 
-        executeMove(nextMove.fileId, nextMove.targetIdx); 
-      }, solveSpeed * 1000);
+      solveTimerRef.current = window.setTimeout(() => { executeMove(nextMove.fileId, nextMove.targetIdx); }, solveSpeed * 1000);
     } else {
       setIsSolving(false);
     }
     return () => { if (solveTimerRef.current) clearTimeout(solveTimerRef.current); };
-  }, [isSolving, sectors, isWon, solveSpeed]);
+  }, [isSolving, sectors, isWon, solveSpeed, defraggedIndices]);
 
   const switchDifficulty = (newMode: DifficultyMode) => {
     const newConfig = DIFFICULTY_SETTINGS[newMode];
@@ -490,9 +470,9 @@ function App() {
       )}
       <DragOverlay dropAnimation={null}>
         {activeFileData && !isWon ? (
-          <div style={{ marginLeft: `-${dragOffset * (config.sectorSize + config.gap)}px`, pointerEvents: 'none' }}>
-            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `${config.gap}px`, width: `${activeFileData.size * (config.sectorSize + config.gap)}px` }}>
-              {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `${config.sectorSize}px`, height: `${config.sectorSize}px` }} />))}
+          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
+            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
+              {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
             </div>
           </div>
         ) : null}
