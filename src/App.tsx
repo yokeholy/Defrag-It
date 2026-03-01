@@ -150,10 +150,9 @@ const DiskGrid = memo(({
       className={`disk-grid ${isWon ? 'locked-grid' : ''} ${isSolving ? 'solving-grid' : ''}`}
       style={{ 
         gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-        '--cols': config.cols,
-        '--max-sector-size': `${config.sectorSize}px`,
-        '--grid-gap': `${config.gap}px`,
-        '--grid-padding': `${GRID_PADDING}px`
+        '--actual-sector-size': `${config.sectorSize}px`,
+        '--actual-grid-gap': `${config.gap}px`,
+        '--actual-grid-padding': `${GRID_PADDING}px`
       } as React.CSSProperties}
     >
       {sectors.map((sector, index) => (
@@ -176,8 +175,8 @@ const DiskGrid = memo(({
             className={`sector-highlight ${isLandingValid ? 'valid' : 'invalid'}`}
             style={{
               position: 'absolute',
-              top: `calc(var(--grid-padding) + ${row} * (var(--actual-sector-size) + var(--grid-gap)))`,
-              left: `calc(var(--grid-padding) + ${col} * (var(--actual-sector-size) + var(--grid-gap)))`,
+              top: `calc(var(--actual-grid-padding) + ${row} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
+              left: `calc(var(--actual-grid-padding) + ${col} * (var(--actual-sector-size) + var(--actual-grid-gap)))`,
               pointerEvents: 'none',
               zIndex: 10
             }}
@@ -362,7 +361,7 @@ function App() {
       };
       let bestFit = null;
       for (const file of allFiles) {
-        if (file.start > firstEmptyIdx && file.size <= gapSize) {
+        if (file.size <= gapSize) {
           if (!bestFit || file.size > bestFit.size) bestFit = file;
         }
       }
@@ -429,7 +428,18 @@ function App() {
           {isWon ? 'DISK OPTIMIZED!' : isSolving ? 'AUTO-SOLVING...' : `Optimization: ${defragPercentage}%`}
           <div className="progress-bar-container"><div className="progress-bar" style={{ width: `${defragPercentage}%` }}></div></div>
         </div>
-        <DiskGrid sectors={sectors} sectorMetadata={sectorMetadata} defraggedIndices={defraggedIndices} isWon={isWon} isSolving={isSolving} config={config} landingIndices={landingData.indices} isLandingValid={landingData.isValid} />
+        
+        <DiskGrid 
+          sectors={sectors} 
+          sectorMetadata={sectorMetadata} 
+          defraggedIndices={defraggedIndices} 
+          isWon={isWon} 
+          isSolving={isSolving} 
+          config={config} 
+          landingIndices={landingData.indices} 
+          isLandingValid={landingData.isValid} 
+        />
+
         <div className="main-actions">
           <button className="reset-btn" onClick={() => setShowModal(true)}>New Disk</button>
           {!isWon && (
@@ -452,6 +462,7 @@ function App() {
           </div>
         </footer>
       </div>
+
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -462,10 +473,11 @@ function App() {
           </div>
         </div>
       )}
+
       <DragOverlay dropAnimation={null}>
         {activeFileData && !isWon ? (
-          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--grid-gap)))`, pointerEvents: 'none' }}>
-            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--grid-gap)))` }}>
+          <div style={{ marginLeft: `calc(-1 * ${dragOffset} * (var(--actual-sector-size) + var(--actual-grid-gap)))`, pointerEvents: 'none' }}>
+            <div className="file-dragging-overlay" style={{ display: 'flex', flexWrap: 'wrap', gap: `var(--actual-grid-gap)`, width: `calc(${activeFileData.size} * (var(--actual-sector-size) + var(--actual-grid-gap)))` }}>
               {Array(activeFileData.size).fill(0).map((_, i) => (<div key={i} className={`sector sector-used ${i === 0 ? 'file-start' : ''} ${i === activeFileData.size - 1 ? 'file-end' : ''}`} style={{ opacity: 0.8, width: `var(--actual-sector-size)`, height: `var(--actual-sector-size)` }} />))}
             </div>
           </div>
